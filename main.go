@@ -7,8 +7,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+
+	"cloud.google.com/go/compute/metadata"
+	consulapi "github.com/hashicorp/consul/api"
+	nomadapi "github.com/hashicorp/nomad/api"
 )
+
+var pugs = map[string]string{
+	"a": "https://storage.googleapis.com/radek-devfest-2017/red-pug.jpg",
+	"b": "https://storage.googleapis.com/radek-devfest-2017/blue-pug.jpg",
+	"c": "https://storage.googleapis.com/radek-devfest-2017/green-pug.jpg",
+}
 
 var (
 	listenFlag  = flag.String("listen", ":5678", "address and port to listen")
@@ -77,8 +88,72 @@ func main() {
 
 func httpEcho(v string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, v)
+		w.Header().Set("Content-Type", "text/html")
+
+		var zoneLetter string
+		zone, err := getZone()
+		if err != nil {
+			zone = "unknown"
+			zoneLetter = ""
+		} else {
+			zoneParts := strings.Split(zone, "-")
+			zoneLetter = zoneParts[len(zoneParts)-1]
+		}
+
+		fmt.Fprintln(w, fmt.Sprintf(`<center><img src="%s"></center>`, pugs[zoneLetter]))
+
+		// Consul
+		var ip string
+		consul, err := getConsulMemberInfo()
+		if err != nil {
+			ip = fmt.Sprintf("unknown / %s", err)
+		} else {
+			ip = consul["Addr"].(string)
+		}
+
+		// Nomad
+		nomad, err := getNomadInfo()
+		if err != nil {
+			fmt.Fprintf(w, "<center>Served from unknown node (%s)</center>", err)
+			return
+		}
+
+		nodeId := nomad.Stats["client"]["node_id"]
+		cfg := nomad.Config
+
+		dc := cfg["Datacenter"].(string)
+
+		fmt.Fprintf(w, "<br><center>Served from <strong>%s</strong> IP: %s (Zone: %s, DC: %s, region: %s)</center>",
+			nodeId, ip, zone, dc, cfg["Region"].(string))
 	}
+}
+
+func getNomadInfo() (*nomadapi.AgentSelf, error) {
+	c, err := nomadapi.NewClient(nomadapi.DefaultConfig())
+	if err != nil {
+		return nil, err
+	}
+	self, err := c.Agent().Self()
+	if err != nil {
+		return nil, err
+	}
+	return self, nil
+}
+
+func getConsulMemberInfo() (map[string]interface{}, error) {
+	c, err := consulapi.NewClient(consulapi.DefaultConfig())
+	if err != nil {
+		return nil, err
+	}
+	self, err := c.Agent().Self()
+	if err != nil {
+		return nil, err
+	}
+	return self["Member"], nil
+}
+
+func getZone() (string, error) {
+	return metadata.Zone()
 }
 
 func httpHealth() http.HandlerFunc {

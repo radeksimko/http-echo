@@ -81,6 +81,10 @@ ifdef GOPATH
 	@cp "${CURRENT_DIR}/pkg/${ME_OS}_${ME_ARCH}/${NAME}" "${GOPATH}/bin/"
 endif
 
+linux:
+	mkdir -p pkg/linux_amd64/
+	GOOS=linux GOARCH=amd64 go build -o pkg/linux_amd64/nomad-http-echo
+
 # dist builds the binaries and then signs and packages them for distribution
 dist:
 ifndef GPG_KEY
